@@ -63,3 +63,12 @@ create table if not exists guests (
 
 create index if not exists guests_category_id_idx on guests (category_id);
 create index if not exists guests_sort_order_idx on guests (sort_order);
+
+-- אבטחה: כל הגישה למסד הנתונים עוברת דרך ה-API (Next.js) עם service_role
+-- key, שעוקף RLS אוטומטית. מפעילים RLS על כל הטבלאות בלי policies כדי
+-- לחסום גישה ציבורית/anon ישירה דרך ה-REST API האוטומטי של Supabase.
+alter table app_settings enable row level security;
+alter table notes enable row level security;
+alter table checklist_items enable row level security;
+alter table guest_categories enable row level security;
+alter table guests enable row level security;

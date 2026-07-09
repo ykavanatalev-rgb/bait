@@ -81,6 +81,27 @@ const categories = [
     ),
   },
   {
+    href: "/tasks",
+    title: "משימות",
+    description: "הקצאת משימות עם תזכורת אוטומטית ביומן Google, לכל מכשיר",
+    gradient: "from-blue-400 via-indigo-500 to-blue-600",
+    ring: "ring-blue-200 hover:ring-blue-300",
+    icon: (
+      <svg viewBox="0 0 64 64" className="h-14 w-14" fill="none" aria-hidden>
+        <rect x="12" y="10" width="40" height="46" rx="4" stroke="currentColor" strokeWidth="2.5" />
+        <path d="M20 24h24M20 34h24M20 44h16" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+        <path
+          d="M17 24l1.5 1.5L21 23"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.7"
+        />
+      </svg>
+    ),
+  },
+  {
     href: "/home",
     title: "בית",
     description: "ציוד וריהוט לכל חדר — מטבח, סלון, שינה ועוד",

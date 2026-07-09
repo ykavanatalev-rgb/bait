@@ -23,6 +23,14 @@ export function getSupabasePublishableKey() {
   );
 }
 
+export function getGoogleClientId() {
+  return process.env.GOOGLE_CLIENT_ID ?? "";
+}
+
+export function getGoogleClientSecret() {
+  return process.env.GOOGLE_CLIENT_SECRET ?? "";
+}
+
 export function getSupabaseConfig() {
   const url = getSupabaseUrl();
   const key = getSupabaseSecretKey();

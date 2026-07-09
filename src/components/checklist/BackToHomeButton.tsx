@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ChecklistAccent } from "@/lib/checklist/types";
 
 interface BackToHomeButtonProps {
-  accent: ChecklistAccent | "violet";
+  accent: ChecklistAccent | "violet" | "blue";
 }
 
 const styles = {
@@ -11,6 +11,7 @@ const styles = {
   emerald: "bg-white text-emerald-700 ring-emerald-200 hover:bg-emerald-50",
   amber: "bg-white text-amber-700 ring-amber-200 hover:bg-amber-50",
   violet: "bg-white text-violet-700 ring-violet-200 hover:bg-violet-50",
+  blue: "bg-white text-blue-700 ring-blue-200 hover:bg-blue-50",
 } as const;
 
 export function BackToHomeButton({ accent }: BackToHomeButtonProps) {
