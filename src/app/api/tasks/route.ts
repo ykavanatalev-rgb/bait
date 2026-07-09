@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentAuthUser } from "@/lib/supabase/auth-server";
-import { createTaskRow, getGoogleAccessTokenForUser, listTasksForUser, updateTaskRow } from "@/lib/tasks/db";
-import { createGoogleCalendarEvent } from "@/lib/tasks/google";
-
-const DEFAULT_EVENT_DURATION_MS = 60 * 60 * 1000;
+import { createTaskRow, getTaskById, listTasksForUser } from "@/lib/tasks/db";
+import { syncTaskCalendarEvents } from "@/lib/tasks/calendar-sync";
 
 export async function GET() {
   const user = await getCurrentAuthUser();
@@ -49,31 +47,10 @@ export async function POST(request: NextRequest) {
       dueAt: body.due_at || null,
     });
 
-    let calendarWarning: string | null = null;
+    const { warning } = await syncTaskCalendarEvents(task);
+    const finalTask = (await getTaskById(task.id)) ?? task;
 
-    if (task.assigned_to && task.due_at) {
-      try {
-        const accessToken = await getGoogleAccessTokenForUser(task.assigned_to);
-        if (accessToken) {
-          const start = new Date(task.due_at);
-          const end = new Date(start.getTime() + DEFAULT_EVENT_DURATION_MS);
-          const eventId = await createGoogleCalendarEvent(accessToken, {
-            title: `משימה: ${task.title}`,
-            description: task.description ?? undefined,
-            startIso: start.toISOString(),
-            endIso: end.toISOString(),
-          });
-          await updateTaskRow(task.id, { google_event_id: eventId });
-        } else {
-          calendarWarning = "האחראי/ת עדיין לא חיבר/ה את Google — לא נוצרה תזכורת ביומן";
-        }
-      } catch (calendarError) {
-        calendarWarning =
-          calendarError instanceof Error ? calendarError.message : "שגיאה ביצירת תזכורת ביומן";
-      }
-    }
-
-    return NextResponse.json({ task, calendarWarning }, { status: 201 });
+    return NextResponse.json({ task: finalTask, calendarWarning: warning }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
       { error: "שגיאה ביצירת משימה", detail: error instanceof Error ? error.message : "unknown" },

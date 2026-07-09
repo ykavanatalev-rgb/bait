@@ -1,19 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentAuthUser } from "@/lib/supabase/auth-server";
-import {
-  createNotification,
-  deleteTaskRow,
-  getGoogleAccessTokenForUser,
-  getTaskById,
-  updateTaskRow,
-} from "@/lib/tasks/db";
-import {
-  createGoogleCalendarEvent,
-  deleteGoogleCalendarEvent,
-  updateGoogleCalendarEvent,
-} from "@/lib/tasks/google";
-
-const DEFAULT_EVENT_DURATION_MS = 60 * 60 * 1000;
+import { createNotification, deleteTaskRow, getTaskById, updateTaskRow } from "@/lib/tasks/db";
+import { deleteTaskCalendarEvents, syncTaskCalendarEvents } from "@/lib/tasks/calendar-sync";
 
 async function requireAccess(taskId: string, userId: string) {
   const task = await getTaskById(taskId);
@@ -57,10 +45,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   try {
-    const updated = await updateTaskRow(id, patch);
-    let calendarWarning: string | null = null;
-
-    const assigneeId = updated.assigned_to;
+    await updateTaskRow(id, patch);
+    const updated = (await getTaskById(id))!;
     const isNowDone = body.status === "done" && existing.status !== "done";
 
     if (isNowDone) {
@@ -68,47 +54,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         userId: updated.created_by,
         taskId: updated.id,
         message: updated.completion_summary
-          ? `המשימה "${updated.title}" בוצעה: ${updated.completion_summary}`
-          : `המשימה "${updated.title}" סומנה כבוצעה`,
+          ? `"${updated.assigned_to_profile?.full_name ?? updated.assigned_to_profile?.email ?? "מישהו"}" ביצע/ה את "${updated.title}": ${updated.completion_summary}`
+          : `המשימה "${updated.title}" בוצעה`,
       });
     }
 
-    if (assigneeId && updated.due_at) {
-      try {
-        const accessToken = await getGoogleAccessTokenForUser(assigneeId);
-        if (accessToken) {
-          const start = new Date(updated.due_at);
-          const end = new Date(start.getTime() + DEFAULT_EVENT_DURATION_MS);
-          const title = isNowDone ? `✔ ${updated.title}` : `משימה: ${updated.title}`;
-          const description = updated.completion_summary
-            ? `${updated.description ?? ""}\n\nסיכום: ${updated.completion_summary}`.trim()
-            : updated.description ?? undefined;
+    const { warning } = await syncTaskCalendarEvents(updated);
+    const finalTask = (await getTaskById(id)) ?? updated;
 
-          const existingEventId = existing.google_event_id;
-          if (existingEventId) {
-            await updateGoogleCalendarEvent(accessToken, existingEventId, {
-              title,
-              description,
-              startIso: start.toISOString(),
-              endIso: end.toISOString(),
-            });
-          } else {
-            const eventId = await createGoogleCalendarEvent(accessToken, {
-              title,
-              description,
-              startIso: start.toISOString(),
-              endIso: end.toISOString(),
-            });
-            await updateTaskRow(updated.id, { google_event_id: eventId });
-          }
-        }
-      } catch (calendarError) {
-        calendarWarning =
-          calendarError instanceof Error ? calendarError.message : "שגיאה בסנכרון תזכורת ביומן";
-      }
-    }
-
-    return NextResponse.json({ task: updated, calendarWarning });
+    return NextResponse.json({ task: finalTask, calendarWarning: warning });
   } catch (error) {
     return NextResponse.json(
       { error: "שגיאה בעדכון משימה", detail: error instanceof Error ? error.message : "unknown" },
@@ -132,16 +86,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     return NextResponse.json({ error: "אין הרשאה למחוק משימה זו" }, { status: 403 });
   }
 
-  const eventId = task.google_event_id;
-  if (eventId && task.assigned_to) {
-    try {
-      const accessToken = await getGoogleAccessTokenForUser(task.assigned_to);
-      if (accessToken) await deleteGoogleCalendarEvent(accessToken, eventId);
-    } catch {
-      // לא חוסמים מחיקה בגלל כשל בסנכרון היומן
-    }
-  }
-
+  await deleteTaskCalendarEvents(task);
   await deleteTaskRow(id);
   return NextResponse.json({ ok: true });
 }

@@ -28,10 +28,17 @@ create table if not exists tasks (
   due_at timestamptz,
   status text not null default 'open' check (status in ('open', 'done')),
   completion_summary text,
+  -- אירוע ביומן Google של האחראי/ת על המשימה
   google_event_id text,
+  -- אירוע ביומן Google של היוצר/ת (סנכרון דו-צדדי)
+  creator_google_event_id text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- אם כבר הרצתם גרסה קודמת של קובץ זה (לפני תמיכה בסנכרון דו-צדדי) —
+-- השורה הזו מוסיפה את העמודה החדשה בלי לפגוע בנתונים קיימים.
+alter table tasks add column if not exists creator_google_event_id text;
 
 create index if not exists tasks_created_by_idx on tasks (created_by);
 create index if not exists tasks_assigned_to_idx on tasks (assigned_to);

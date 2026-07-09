@@ -23,6 +23,9 @@ function mapTask(row: Record<string, unknown>): Task {
     status: row.status === "done" ? "done" : "open",
     completion_summary: row.completion_summary ? String(row.completion_summary) : null,
     google_event_id: row.google_event_id ? String(row.google_event_id) : null,
+    creator_google_event_id: row.creator_google_event_id
+      ? String(row.creator_google_event_id)
+      : null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
     created_by_profile: row.created_by_profile
@@ -164,6 +167,7 @@ export async function updateTaskRow(
     status: "open" | "done";
     completion_summary: string | null;
     google_event_id: string | null;
+    creator_google_event_id: string | null;
   }>,
 ): Promise<Task> {
   const supabase = createAdminClient();

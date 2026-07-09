@@ -105,6 +105,17 @@ export function TasksPage() {
     };
   }, [supabase, loadProfile, loadTasks, loadProfiles, loadNotifications]);
 
+  // פולינג קל להתראות ולמשימות כדי שדיווח "ביצעתי משימה" יגיע כמעט
+  // באופן מיידי גם בלי שהמשתמש מרפרש את הדף (RLS חוסם Realtime מהדפדפן).
+  useEffect(() => {
+    if (!profile) return;
+    const interval = setInterval(() => {
+      loadNotifications();
+      loadTasks();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [profile, loadNotifications, loadTasks]);
+
   const signIn = useCallback(async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -477,7 +488,7 @@ export function TasksPage() {
                           onClick={() => setCompletingTaskId(task.id)}
                           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
                         >
-                          סימון כבוצע
+                          ביצעתי משימה
                         </button>
                       )}
                       <button

@@ -16,6 +16,7 @@ export interface Task {
   status: "open" | "done";
   completion_summary: string | null;
   google_event_id: string | null;
+  creator_google_event_id: string | null;
   created_at: string;
   updated_at: string;
   created_by_profile?: TaskProfile;
