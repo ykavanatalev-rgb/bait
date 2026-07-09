@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Bait",
-  description: "אפליקציה חדשה — Bait",
+  title: "Bait — ניהול משימות ותקציב",
+  description: "אפליקציית checklist לחתונה ולבית — משימות, מחירים וייצוא",
 };
 
 export const viewport: Viewport = {
