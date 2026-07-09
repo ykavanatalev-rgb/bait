@@ -36,11 +36,11 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 }
 
 export function getGoogleClientId() {
-  return process.env.GOOGLE_CLIENT_ID ?? "";
+  return process.env.GOOGLE_CLIENT_ID ?? process.env.AUTH_GOOGLE_ID ?? "";
 }
 
 export function getGoogleClientSecret() {
-  return process.env.GOOGLE_CLIENT_SECRET ?? "";
+  return process.env.GOOGLE_CLIENT_SECRET ?? process.env.AUTH_GOOGLE_SECRET ?? "";
 }
 
 export function getSupabaseConfig() {
