@@ -2,14 +2,18 @@
 
 import type { Guest, GuestCategoryWithGuests } from "@/lib/guests/types";
 import { exportGuestsToCsv, openGuestsWhatsAppReport } from "@/lib/guests/export";
-import { isContactPickerSupported } from "@/lib/guests/contacts";
 import { BackToHomeButton } from "@/components/checklist/BackToHomeButton";
-import { ContactSyncPrompt, ContactSyncWizard } from "@/components/guests/ContactSync";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GuestContactLinker } from "@/components/guests/ContactSync";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type GuestWithCategory = Guest & { categoryName: string };
 
-const PROMPT_DISMISS_KEY = "bait-guests-contacts-prompt-dismissed";
+type LinkingState = {
+  guest: Guest;
+  categoryName: string;
+  queue: Guest[];
+  index: number;
+};
 
 export function GuestListPage() {
   const [categories, setCategories] = useState<GuestCategoryWithGuests[]>([]);
@@ -21,10 +25,7 @@ export function GuestListPage() {
   const [saving, setSaving] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
-  const [showSyncPrompt, setShowSyncPrompt] = useState(false);
-  const [syncActive, setSyncActive] = useState(false);
-  const [pickerSupported, setPickerSupported] = useState(false);
-  const autoSyncStarted = useRef(false);
+  const [linking, setLinking] = useState<LinkingState | null>(null);
 
   const totalGuests = useMemo(
     () => categories.reduce((sum, c) => sum + c.guests.length, 0),
@@ -75,50 +76,44 @@ export function GuestListPage() {
     loadData();
   }, [loadData]);
 
-  useEffect(() => {
-    setPickerSupported(isContactPickerSupported());
-  }, []);
-
-  useEffect(() => {
-    if (loading || error || syncActive) return;
-    if (guestsMissingPhone.length === 0) return;
-    if (autoSyncStarted.current) return;
-    try {
-      if (sessionStorage.getItem(PROMPT_DISMISS_KEY) === "1") return;
-    } catch {
-      /* ignore */
-    }
-    autoSyncStarted.current = true;
-    // בכניסה לעמוד — פותחים מיד את מסך הסינכרון
-    setSyncActive(true);
-  }, [loading, error, syncActive, guestsMissingPhone.length]);
-
-  function dismissSyncPrompt() {
-    setShowSyncPrompt(false);
-    try {
-      sessionStorage.setItem(PROMPT_DISMISS_KEY, "1");
-    } catch {
-      /* ignore */
-    }
+  function categoryNameFor(guest: Guest): string {
+    return categories.find((c) => c.id === guest.category_id)?.name ?? "";
   }
 
-  function closeContactSync() {
-    setSyncActive(false);
-    try {
-      sessionStorage.setItem(PROMPT_DISMISS_KEY, "1");
-    } catch {
-      /* ignore */
-    }
+  function openGuestContact(guest: Guest, queue?: Guest[]) {
+    const list = queue && queue.length > 0 ? queue : [guest];
+    const index = Math.max(0, list.findIndex((g) => g.id === guest.id));
+    const current = list[index] ?? guest;
+    setLinking({
+      guest: current,
+      categoryName: categoryNameFor(current),
+      queue: list,
+      index,
+    });
   }
 
   function startContactSync() {
-    try {
-      sessionStorage.removeItem(PROMPT_DISMISS_KEY);
-    } catch {
-      /* ignore */
+    const missing = guestsMissingPhone;
+    if (missing.length === 0) {
+      alert("לכל המוזמנים כבר יש מספר טלפון");
+      return;
     }
-    setShowSyncPrompt(false);
-    setSyncActive(true);
+    openGuestContact(missing[0], missing);
+  }
+
+  function advanceOrCloseLinking() {
+    setLinking((prev) => {
+      if (!prev) return null;
+      const nextIndex = prev.index + 1;
+      if (nextIndex >= prev.queue.length) return null;
+      const nextGuest = prev.queue[nextIndex];
+      return {
+        guest: nextGuest,
+        categoryName: categoryNameFor(nextGuest),
+        queue: prev.queue,
+        index: nextIndex,
+      };
+    });
   }
 
   function patchGuestContactInState(
@@ -162,6 +157,7 @@ export function GuestListPage() {
         contact_name: data.guest.contact_name ?? null,
       });
     }
+    advanceOrCloseLinking();
   }
 
   function toggleExpanded(categoryId: string) {
@@ -384,7 +380,7 @@ export function GuestListPage() {
       <header className="bg-gradient-to-l from-violet-500 to-purple-600 px-4 py-8 text-white shadow-lg">
         <div className="mx-auto max-w-3xl">
           <h1 className="text-3xl font-bold">רשימת מוזמנים</h1>
-          <p className="mt-1 text-white/85">גלול ברשימת הקטגוריות או חפש לפי שם</p>
+          <p className="mt-1 text-white/85">לחצי על שם מוזמן כדי לקשר טלפון מאנשי קשר</p>
         </div>
       </header>
 
@@ -424,10 +420,10 @@ export function GuestListPage() {
             className="mb-4 w-full rounded-2xl bg-violet-50 px-4 py-3 text-right ring-1 ring-violet-200 hover:bg-violet-100/70"
           >
             <span className="block text-sm font-bold text-violet-800">
-              {guestsMissingPhone.length} מוזמנים בלי טלפון
+              {guestsMissingPhone.length} מוזמנים בלי טלפון — התחילי כאן
             </span>
             <span className="mt-0.5 block text-xs text-violet-600">
-              לחצו לסינכרון מאנשי הקשר — אחר כך Excel יכלול שם ומספר
+              או לחצי על כל שם ברשימה כדי לחפש באנשי קשר ולשמור מספר
             </span>
           </button>
         )}
@@ -490,13 +486,14 @@ export function GuestListPage() {
             onUpdateGuest={updateGuest}
             onDeleteGuest={deleteGuest}
             onMoveGuest={moveGuest}
+            onLinkContact={(guest) => openGuestContact(guest)}
           />
         )}
 
         {!loading && !error && !isSearching && (
           <>
             <p className="mb-3 text-sm text-slate-500">
-              {categories.length} קטגוריות · {totalGuests} מוזמנים · לחץ על קטגוריה לפתיחה
+              {categories.length} קטגוריות · {totalGuests} מוזמנים · לחצי על שם לקישור טלפון
             </p>
 
             <ol className="space-y-2">
@@ -515,6 +512,7 @@ export function GuestListPage() {
                   onUpdateGuest={updateGuest}
                   onDeleteGuest={deleteGuest}
                   onMoveGuest={moveGuest}
+                  onLinkContact={(guest) => openGuestContact(guest)}
                   onRenameCategory={renameCategory}
                   onDeleteCategory={deleteCategory}
                 />
@@ -575,19 +573,15 @@ export function GuestListPage() {
         </div>
       )}
 
-      <ContactSyncPrompt
-        open={showSyncPrompt && !syncActive}
-        missingCount={guestsMissingPhone.length}
-        pickerSupported={pickerSupported}
-        onStart={startContactSync}
-        onDismiss={dismissSyncPrompt}
-      />
-
-      {syncActive && (
-        <ContactSyncWizard
-          guests={allGuests}
+      {linking && (
+        <GuestContactLinker
+          guest={linking.guest}
+          categoryName={linking.categoryName}
+          queueIndex={linking.queue.length > 1 ? linking.index : undefined}
+          queueTotal={linking.queue.length > 1 ? linking.queue.length : undefined}
           onSave={saveGuestContact}
-          onClose={closeContactSync}
+          onSkip={linking.queue.length > 1 ? advanceOrCloseLinking : undefined}
+          onClose={() => setLinking(null)}
         />
       )}
     </div>
@@ -602,6 +596,7 @@ function SearchResultsPanel({
   onUpdateGuest,
   onDeleteGuest,
   onMoveGuest,
+  onLinkContact,
 }: {
   query: string;
   results: GuestWithCategory[];
@@ -610,6 +605,7 @@ function SearchResultsPanel({
   onUpdateGuest: (id: string, categoryId: string, name: string) => Promise<void>;
   onDeleteGuest: (id: string, categoryId: string, name: string) => Promise<void>;
   onMoveGuest: (guestId: string, from: string, to: string) => Promise<void>;
+  onLinkContact: (guest: Guest) => void;
 }) {
   return (
     <div className="rounded-2xl bg-white p-4 ring-1 ring-violet-100">
@@ -619,7 +615,7 @@ function SearchResultsPanel({
       <p className="mb-4 text-sm text-slate-500">
         {results.length === 0
           ? "לא נמצאו שמות — נסה חיפוש אחר"
-          : `${results.length} תוצאות`}
+          : `${results.length} תוצאות · לחצי על שם לטלפון`}
       </p>
 
       {results.length > 0 && (
@@ -632,14 +628,20 @@ function SearchResultsPanel({
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-200 text-xs font-bold text-violet-800">
                 {index + 1}
               </span>
-              <span className="min-w-0 flex-1 text-right">
+              <button
+                type="button"
+                onClick={() => onLinkContact(guest)}
+                className="min-w-0 flex-1 text-right"
+              >
                 <span className="block text-sm font-semibold text-slate-900">{guest.name}</span>
                 {guest.phone ? (
                   <span className="mt-0.5 block text-xs text-violet-600" dir="ltr">
                     {guest.phone}
                   </span>
-                ) : null}
-              </span>
+                ) : (
+                  <span className="mt-0.5 block text-xs text-amber-600">לחצי לקישור טלפון</span>
+                )}
+              </button>
               <button
                 type="button"
                 onClick={() => onOpenCategory(guest.category_id)}
@@ -769,6 +771,7 @@ function CategoryAccordionItem({
   onUpdateGuest,
   onDeleteGuest,
   onMoveGuest,
+  onLinkContact,
   onRenameCategory,
   onDeleteCategory,
 }: {
@@ -784,6 +787,7 @@ function CategoryAccordionItem({
   onUpdateGuest: (id: string, categoryId: string, name: string) => Promise<void>;
   onDeleteGuest: (id: string, categoryId: string, name: string) => Promise<void>;
   onMoveGuest: (guestId: string, from: string, to: string) => Promise<void>;
+  onLinkContact: (guest: Guest) => void;
   onRenameCategory: (id: string, name: string) => Promise<void>;
   onDeleteCategory: (id: string, name: string, count: number) => Promise<void>;
 }) {
@@ -945,6 +949,7 @@ function CategoryAccordionItem({
                   onUpdate={(id, n) => onUpdateGuest(id, category.id, n)}
                   onDelete={(id, n) => onDeleteGuest(id, category.id, n)}
                   onMoveCategory={onMoveGuest}
+                  onLinkContact={() => onLinkContact(guest)}
                 />
               ))}
             </ol>
@@ -962,6 +967,7 @@ function GuestRow({
   onUpdate,
   onDelete,
   onMoveCategory,
+  onLinkContact,
 }: {
   guest: Guest;
   index: number;
@@ -969,6 +975,7 @@ function GuestRow({
   onUpdate: (id: string, name: string) => Promise<void>;
   onDelete: (id: string, name: string) => Promise<void>;
   onMoveCategory: (guestId: string, fromCategoryId: string, toCategoryId: string) => Promise<void>;
+  onLinkContact: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(guest.name);
@@ -1024,8 +1031,12 @@ function GuestRow({
         </div>
       ) : (
         <>
-          <div className="min-w-0 flex-1 text-right">
-            <span className="block text-sm text-slate-800">{guest.name}</span>
+          <button
+            type="button"
+            onClick={onLinkContact}
+            className="min-w-0 flex-1 text-right"
+          >
+            <span className="block text-sm font-semibold text-slate-800">{guest.name}</span>
             {guest.phone ? (
               <span className="mt-0.5 block text-xs text-violet-600" dir="ltr">
                 {guest.contact_name && guest.contact_name !== guest.name
@@ -1034,9 +1045,11 @@ function GuestRow({
                 {guest.phone}
               </span>
             ) : (
-              <span className="mt-0.5 block text-xs text-amber-600">אין טלפון</span>
+              <span className="mt-0.5 block text-xs font-semibold text-amber-600">
+                לחצי כאן ← חיפוש באנשי קשר
+              </span>
             )}
-          </div>
+          </button>
           <select
             value={guest.category_id}
             onChange={(e) => onMoveCategory(guest.id, guest.category_id, e.target.value)}

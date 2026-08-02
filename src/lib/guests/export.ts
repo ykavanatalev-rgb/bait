@@ -8,32 +8,15 @@ function escapeCsv(value: string): string {
 }
 
 export function exportGuestsToCsv(categories: GuestCategoryWithGuests[]): void {
-  const total = categories.reduce((sum, c) => sum + c.guests.length, 0);
   const rows: string[][] = [
-    ["רשימת מוזמנים — Bait"],
-    [`תאריך: ${new Date().toLocaleDateString("he-IL")}`],
-    [],
+    ["שם מוזמן", "קטגוריה", "טלפון"],
   ];
 
   for (const category of categories) {
-    rows.push([`קטגוריה: ${category.name}`]);
-    rows.push(["מס'", "שם ברשימה", "שם באנשי קשר", "טלפון"]);
-
-    category.guests.forEach((guest, index) => {
-      rows.push([
-        String(index + 1),
-        guest.name,
-        guest.contact_name ?? "",
-        guest.phone ?? "",
-      ]);
-    });
-
-    rows.push(["סיכום קטגוריה", String(category.guests.length)]);
-    rows.push([]);
+    for (const guest of category.guests) {
+      rows.push([guest.name, category.name, guest.phone ?? ""]);
+    }
   }
-
-  rows.push(["סיכום כללי"]);
-  rows.push(["סה\"כ מוזמנים", String(total)]);
 
   const csv = rows.map((row) => row.map((cell) => escapeCsv(cell)).join(",")).join("\n");
   const bom = "\uFEFF";
