@@ -380,7 +380,10 @@ export function GuestListPage() {
       <header className="bg-gradient-to-l from-violet-500 to-purple-600 px-4 py-8 text-white shadow-lg">
         <div className="mx-auto max-w-3xl">
           <h1 className="text-3xl font-bold">רשימת מוזמנים</h1>
-          <p className="mt-1 text-white/85">לחצי על שם מוזמן כדי לקשר טלפון מאנשי קשר</p>
+          <p className="mt-1 text-white/85">לחצי על 📇 טלפון ליד כל שם כדי לקשר מספר</p>
+          <p className="mt-2 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold">
+            גרסה contacts-v3
+          </p>
         </div>
       </header>
 
