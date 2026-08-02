@@ -16,6 +16,11 @@ function mapGuest(row: Record<string, unknown>): Guest {
     id: String(row.id),
     category_id: String(row.category_id),
     name: String(row.name),
+    phone: row.phone != null && String(row.phone).trim() ? String(row.phone).trim() : null,
+    contact_name:
+      row.contact_name != null && String(row.contact_name).trim()
+        ? String(row.contact_name).trim()
+        : null,
     sort_order: Number(row.sort_order ?? 0),
     created_at: row.created_at ? String(row.created_at) : undefined,
   };
@@ -277,6 +282,37 @@ export async function updateGuestName(guestId: string, name: string): Promise<Gu
   const { data, error } = await supabase
     .from("guests")
     .update({ name: trimmed })
+    .eq("id", guestId)
+    .select("*")
+    .single();
+
+  if (error) throw error;
+  return mapGuest(data);
+}
+
+export async function updateGuestContact(
+  guestId: string,
+  fields: { phone?: string | null; contact_name?: string | null },
+): Promise<Guest> {
+  const supabase = createAdminClient();
+
+  const patch: Record<string, string | null> = {};
+  if ("phone" in fields) {
+    const phone = fields.phone?.trim() || null;
+    patch.phone = phone;
+  }
+  if ("contact_name" in fields) {
+    const contact_name = fields.contact_name?.trim() || null;
+    patch.contact_name = contact_name;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new Error("אין שדות לעדכון");
+  }
+
+  const { data, error } = await supabase
+    .from("guests")
+    .update(patch)
     .eq("id", guestId)
     .select("*")
     .single();

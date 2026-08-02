@@ -57,6 +57,8 @@ create table if not exists guests (
   id uuid primary key default gen_random_uuid(),
   category_id uuid not null references guest_categories(id) on delete cascade,
   name text not null,
+  phone text,
+  contact_name text,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
 );

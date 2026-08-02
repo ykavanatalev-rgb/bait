@@ -2,10 +2,14 @@
 
 import type { Guest, GuestCategoryWithGuests } from "@/lib/guests/types";
 import { exportGuestsToCsv, openGuestsWhatsAppReport } from "@/lib/guests/export";
+import { isContactPickerSupported } from "@/lib/guests/contacts";
 import { BackToHomeButton } from "@/components/checklist/BackToHomeButton";
+import { ContactSyncPrompt, ContactSyncWizard } from "@/components/guests/ContactSync";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type GuestWithCategory = Guest & { categoryName: string };
+
+const PROMPT_DISMISS_KEY = "bait-guests-contacts-prompt-dismissed";
 
 export function GuestListPage() {
   const [categories, setCategories] = useState<GuestCategoryWithGuests[]>([]);
@@ -17,6 +21,9 @@ export function GuestListPage() {
   const [saving, setSaving] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
+  const [showSyncPrompt, setShowSyncPrompt] = useState(false);
+  const [syncActive, setSyncActive] = useState(false);
+  const [pickerSupported, setPickerSupported] = useState(false);
 
   const totalGuests = useMemo(
     () => categories.reduce((sum, c) => sum + c.guests.length, 0),
@@ -29,6 +36,11 @@ export function GuestListPage() {
         c.guests.map((g) => ({ ...g, categoryName: c.name })),
       ),
     [categories],
+  );
+
+  const guestsMissingPhone = useMemo(
+    () => allGuests.filter((g) => !g.phone?.trim()),
+    [allGuests],
   );
 
   const searchResults = useMemo(() => {
@@ -61,6 +73,78 @@ export function GuestListPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    setPickerSupported(isContactPickerSupported());
+  }, []);
+
+  useEffect(() => {
+    if (loading || error || syncActive) return;
+    if (guestsMissingPhone.length === 0) return;
+    try {
+      if (sessionStorage.getItem(PROMPT_DISMISS_KEY) === "1") return;
+    } catch {
+      /* ignore */
+    }
+    setShowSyncPrompt(true);
+  }, [loading, error, syncActive, guestsMissingPhone.length]);
+
+  function dismissSyncPrompt() {
+    setShowSyncPrompt(false);
+    try {
+      sessionStorage.setItem(PROMPT_DISMISS_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function startContactSync() {
+    setShowSyncPrompt(false);
+    setSyncActive(true);
+  }
+
+  function patchGuestContactInState(
+    categoryId: string,
+    guestId: string,
+    contact: { phone: string | null; contact_name: string | null },
+  ) {
+    updateGuestInState(categoryId, (guests) =>
+      guests.map((g) =>
+        g.id === guestId
+          ? { ...g, phone: contact.phone, contact_name: contact.contact_name }
+          : g,
+      ),
+    );
+  }
+
+  async function saveGuestContact(
+    guestId: string,
+    categoryId: string,
+    contact: { phone: string | null; contact_name: string | null },
+  ) {
+    patchGuestContactInState(categoryId, guestId, contact);
+
+    const res = await fetch(`/api/guests/${guestId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone: contact.phone,
+        contact_name: contact.contact_name,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      await loadData();
+      if (data.needsMigration) setNeedsMigration(true);
+      throw new Error(data.error ?? data.detail ?? "שגיאה בשמירת איש קשר");
+    }
+    if (data.guest) {
+      patchGuestContactInState(categoryId, guestId, {
+        phone: data.guest.phone ?? null,
+        contact_name: data.guest.contact_name ?? null,
+      });
+    }
+  }
 
   function toggleExpanded(categoryId: string) {
     setExpandedIds((prev) => {
@@ -304,7 +388,31 @@ export function GuestListPage() {
           >
             ↓ ייצוא Excel
           </button>
+          <button
+            type="button"
+            onClick={startContactSync}
+            disabled={totalGuests === 0}
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-violet-700 ring-1 ring-violet-200 hover:bg-violet-50 disabled:opacity-40"
+          >
+            📇 סנכרן אנשי קשר
+            {guestsMissingPhone.length > 0 ? ` (${guestsMissingPhone.length})` : ""}
+          </button>
         </div>
+
+        {!loading && !error && guestsMissingPhone.length > 0 && (
+          <button
+            type="button"
+            onClick={startContactSync}
+            className="mb-4 w-full rounded-2xl bg-violet-50 px-4 py-3 text-right ring-1 ring-violet-200 hover:bg-violet-100/70"
+          >
+            <span className="block text-sm font-bold text-violet-800">
+              {guestsMissingPhone.length} מוזמנים בלי טלפון
+            </span>
+            <span className="mt-0.5 block text-xs text-violet-600">
+              לחצו לסינכרון מאנשי הקשר — אחר כך Excel יכלול שם ומספר
+            </span>
+          </button>
+        )}
 
         {!loading && !error && (
           <div className="mb-4">
@@ -343,9 +451,10 @@ export function GuestListPage() {
             <p className="font-semibold">{error}</p>
             {needsMigration && (
               <p className="mt-2 text-sm">
-                הרץ את{" "}
-                <code className="rounded bg-red-100 px-1">guests-categories-migration.sql</code>{" "}
-                ב-Supabase
+                הרץ ב-Supabase:{" "}
+                <code className="rounded bg-red-100 px-1">guests-categories-migration.sql</code>
+                {" / "}
+                <code className="rounded bg-red-100 px-1">guests-phone-migration.sql</code>
               </p>
             )}
             <button type="button" onClick={loadData} className="mt-3 text-sm font-semibold underline">
@@ -447,6 +556,22 @@ export function GuestListPage() {
           </div>
         </div>
       )}
+
+      <ContactSyncPrompt
+        open={showSyncPrompt && !syncActive}
+        missingCount={guestsMissingPhone.length}
+        pickerSupported={pickerSupported}
+        onStart={startContactSync}
+        onDismiss={dismissSyncPrompt}
+      />
+
+      {syncActive && (
+        <ContactSyncWizard
+          guests={allGuests}
+          onSave={saveGuestContact}
+          onClose={() => setSyncActive(false)}
+        />
+      )}
     </div>
   );
 }
@@ -489,8 +614,13 @@ function SearchResultsPanel({
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-200 text-xs font-bold text-violet-800">
                 {index + 1}
               </span>
-              <span className="min-w-0 flex-1 text-sm font-semibold text-slate-900">
-                {guest.name}
+              <span className="min-w-0 flex-1 text-right">
+                <span className="block text-sm font-semibold text-slate-900">{guest.name}</span>
+                {guest.phone ? (
+                  <span className="mt-0.5 block text-xs text-violet-600" dir="ltr">
+                    {guest.phone}
+                  </span>
+                ) : null}
               </span>
               <button
                 type="button"
@@ -876,7 +1006,19 @@ function GuestRow({
         </div>
       ) : (
         <>
-          <span className="min-w-0 flex-1 text-right text-sm text-slate-800">{guest.name}</span>
+          <div className="min-w-0 flex-1 text-right">
+            <span className="block text-sm text-slate-800">{guest.name}</span>
+            {guest.phone ? (
+              <span className="mt-0.5 block text-xs text-violet-600" dir="ltr">
+                {guest.contact_name && guest.contact_name !== guest.name
+                  ? `${guest.contact_name} · `
+                  : ""}
+                {guest.phone}
+              </span>
+            ) : (
+              <span className="mt-0.5 block text-xs text-amber-600">אין טלפון</span>
+            )}
+          </div>
           <select
             value={guest.category_id}
             onChange={(e) => onMoveCategory(guest.id, guest.category_id, e.target.value)}

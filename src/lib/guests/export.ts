@@ -17,10 +17,15 @@ export function exportGuestsToCsv(categories: GuestCategoryWithGuests[]): void {
 
   for (const category of categories) {
     rows.push([`קטגוריה: ${category.name}`]);
-    rows.push(["מס'", "שם"]);
+    rows.push(["מס'", "שם ברשימה", "שם באנשי קשר", "טלפון"]);
 
     category.guests.forEach((guest, index) => {
-      rows.push([String(index + 1), guest.name]);
+      rows.push([
+        String(index + 1),
+        guest.name,
+        guest.contact_name ?? "",
+        guest.phone ?? "",
+      ]);
     });
 
     rows.push(["סיכום קטגוריה", String(category.guests.length)]);
@@ -63,7 +68,11 @@ export function buildGuestsWhatsAppReport(categories: GuestCategoryWithGuests[])
       lines.push("— אין מוזמנים —");
     } else {
       category.guests.forEach((guest, i) => {
-        lines.push(`${i + 1}. ${guest.name}`);
+        const phone = guest.phone ? ` — ${guest.phone}` : "";
+        const contact = guest.contact_name && guest.contact_name !== guest.name
+          ? ` (${guest.contact_name})`
+          : "";
+        lines.push(`${i + 1}. ${guest.name}${contact}${phone}`);
       });
     }
     lines.push("");

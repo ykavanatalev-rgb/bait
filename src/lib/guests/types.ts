@@ -9,6 +9,10 @@ export interface Guest {
   id: string;
   category_id: string;
   name: string;
+  /** מספר טלפון מאנשי הקשר / הזנה ידנית */
+  phone: string | null;
+  /** שם איש הקשר כפי שנבחר במכשיר */
+  contact_name: string | null;
   sort_order: number;
   created_at?: string;
 }

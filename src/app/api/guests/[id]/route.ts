@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { moveGuest, updateGuestName } from "@/lib/guests/db";
+import { moveGuest, updateGuestContact, updateGuestName } from "@/lib/guests/db";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -18,31 +18,73 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const body = (await request.json()) as {
       name?: string;
       category_id?: string;
+      phone?: string | null;
+      contact_name?: string | null;
     };
+
+    const hasContactPatch = "phone" in body || "contact_name" in body;
 
     if (body.category_id && body.name?.trim()) {
       await updateGuestName(id, body.name);
-      const guest = await moveGuest(id, body.category_id);
+      let guest = await moveGuest(id, body.category_id);
+      if (hasContactPatch) {
+        guest = await updateGuestContact(id, {
+          phone: body.phone,
+          contact_name: body.contact_name,
+        });
+      }
       return NextResponse.json({ guest });
     }
 
     if (body.category_id) {
-      const guest = await moveGuest(id, body.category_id);
+      let guest = await moveGuest(id, body.category_id);
+      if (hasContactPatch) {
+        guest = await updateGuestContact(id, {
+          phone: body.phone,
+          contact_name: body.contact_name,
+        });
+      }
+      return NextResponse.json({ guest });
+    }
+
+    if (hasContactPatch && !body.name?.trim()) {
+      const guest = await updateGuestContact(id, {
+        phone: body.phone,
+        contact_name: body.contact_name,
+      });
       return NextResponse.json({ guest });
     }
 
     const name = body.name?.trim();
     if (!name) {
-      return NextResponse.json({ error: "נדרש name או category_id" }, { status: 400 });
+      return NextResponse.json(
+        { error: "נדרש name, category_id או phone/contact_name" },
+        { status: 400 },
+      );
     }
 
-    const guest = await updateGuestName(id, name);
+    let guest = await updateGuestName(id, name);
+    if (hasContactPatch) {
+      guest = await updateGuestContact(id, {
+        phone: body.phone,
+        contact_name: body.contact_name,
+      });
+    }
     return NextResponse.json({ guest });
   } catch (error) {
+    const detail = extractError(error);
+    const needsMigration =
+      detail.includes("phone") ||
+      detail.includes("contact_name") ||
+      detail.includes("column");
+
     return NextResponse.json(
       {
-        error: "שגיאה בעדכון מוזמן",
-        detail: extractError(error),
+        error: needsMigration
+          ? "נדרש עדכון DB — הרץ guests-phone-migration.sql ב-Supabase"
+          : "שגיאה בעדכון מוזמן",
+        detail,
+        needsMigration,
       },
       { status: 500 },
     );
