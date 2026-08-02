@@ -29,6 +29,8 @@ export function TasksPage() {
   const [profiles, setProfiles] = useState<TaskProfile[]>([]);
   const [contacts, setContacts] = useState<GoogleContactSummary[]>([]);
   const [contactsMessage, setContactsMessage] = useState<string | null>(null);
+  const [contactsQuery, setContactsQuery] = useState("");
+  const [loadingContacts, setLoadingContacts] = useState(false);
   const [notifications, setNotifications] = useState<TaskNotification[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [showNewTask, setShowNewTask] = useState(false);
@@ -66,12 +68,26 @@ export function TasksPage() {
     setProfiles(data.profiles);
   }, []);
 
-  const loadContacts = useCallback(async () => {
-    const res = await fetch("/api/tasks/contacts");
-    if (!res.ok) return;
-    const data = (await res.json()) as { contacts: GoogleContactSummary[]; message?: string };
-    setContacts(data.contacts);
-    setContactsMessage(data.message ?? null);
+  const loadContacts = useCallback(async (query: string) => {
+    const q = query.trim();
+    if (!q) {
+      setContacts([]);
+      setContactsMessage("הקלידו שם לחיפוש באנשי הקשר");
+      return;
+    }
+    setLoadingContacts(true);
+    try {
+      const res = await fetch(`/api/tasks/contacts?q=${encodeURIComponent(q)}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        contacts: GoogleContactSummary[];
+        message?: string | null;
+      };
+      setContacts(data.contacts);
+      setContactsMessage(data.message ?? null);
+    } finally {
+      setLoadingContacts(false);
+    }
   }, []);
 
   const loadNotifications = useCallback(async () => {
@@ -418,10 +434,7 @@ export function TasksPage() {
         )}
 
         <button
-          onClick={() => {
-            setShowContacts((v) => !v);
-            if (!showContacts && contacts.length === 0) loadContacts();
-          }}
+          onClick={() => setShowContacts((v) => !v)}
           className="mt-4 text-sm font-semibold text-blue-600 hover:underline"
         >
           {showContacts ? "הסתרת אנשי קשר" : "הצגת אנשי הקשר שלי מ-Google"}
@@ -429,6 +442,26 @@ export function TasksPage() {
 
         {showContacts && (
           <div className="mt-3 rounded-2xl bg-white p-4 shadow ring-1 ring-slate-200">
+            <div className="mb-3 flex gap-2">
+              <input
+                type="search"
+                value={contactsQuery}
+                onChange={(e) => setContactsQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void loadContacts(contactsQuery);
+                }}
+                placeholder="חיפוש באנשי קשר Google..."
+                className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-300"
+              />
+              <button
+                type="button"
+                onClick={() => void loadContacts(contactsQuery)}
+                disabled={loadingContacts}
+                className="rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {loadingContacts ? "..." : "חפש"}
+              </button>
+            </div>
             {contactsMessage && <p className="text-sm text-amber-700">{contactsMessage}</p>}
             <ul className="max-h-64 space-y-1 overflow-y-auto text-sm">
               {contacts.map((c) => (
@@ -438,7 +471,7 @@ export function TasksPage() {
                 </li>
               ))}
               {contacts.length === 0 && !contactsMessage && (
-                <li className="text-slate-400">לא נמצאו אנשי קשר</li>
+                <li className="text-slate-400">הקלידו שם ולחצו חפש</li>
               )}
             </ul>
           </div>

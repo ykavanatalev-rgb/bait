@@ -8,31 +8,13 @@ import {
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { GOOGLE_OAUTH_SCOPES } from "@/lib/tasks/scopes";
 import type { GoogleContactSummary } from "@/lib/tasks/types";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type SaveContactFn = (
   guestId: string,
   categoryId: string,
   contact: { phone: string | null; contact_name: string | null },
 ) => Promise<void>;
-
-function normalize(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function rankMatch(guestName: string, contactName: string): number {
-  const g = normalize(guestName);
-  const c = normalize(contactName);
-  if (!g || !c) return 0;
-  if (c === g) return 100;
-  if (c.includes(g) || g.includes(c)) return 80;
-  const gParts = g.split(" ");
-  const cParts = c.split(" ");
-  const overlap = gParts.filter(
-    (p) => p.length > 1 && cParts.some((cp) => cp.includes(p) || p.includes(cp)),
-  );
-  return overlap.length * 25;
-}
 
 export function GuestContactLinker({
   guest,
@@ -56,7 +38,7 @@ export function GuestContactLinker({
   const [search, setSearch] = useState(guest.name);
   const [contacts, setContacts] = useState<GoogleContactSummary[]>([]);
   const [contactsMessage, setContactsMessage] = useState<string | null>(null);
-  const [loadingContacts, setLoadingContacts] = useState(true);
+  const [loadingContacts, setLoadingContacts] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +50,8 @@ export function GuestContactLinker({
     setManualPhone(guest.phone ?? "");
     setManualName(guest.contact_name ?? guest.name);
     setError(null);
+    setContacts([]);
+    setContactsMessage(null);
   }, [guest.id, guest.name, guest.phone, guest.contact_name]);
 
   const getSupabase = useCallback(() => {
@@ -80,9 +64,7 @@ export function GuestContactLinker({
     }
   }, []);
 
-  const loadContacts = useCallback(async () => {
-    setLoadingContacts(true);
-    setContactsMessage(null);
+  const checkSession = useCallback(async () => {
     try {
       const supabase = getSupabase();
       const { data } = await supabase.auth.getSession();
@@ -90,53 +72,65 @@ export function GuestContactLinker({
       if (!data.session) {
         setContacts([]);
         setContactsMessage("התחברי עם Google כדי לחפש באנשי הקשר (עובד גם באייפון)");
-        return;
       }
-
-      const res = await fetch("/api/tasks/contacts");
-      const dataJson = (await res.json()) as {
-        contacts?: GoogleContactSummary[];
-        message?: string;
-        error?: string;
-      };
-      if (!res.ok) {
-        setContacts([]);
-        setContactsMessage(dataJson.error ?? "שגיאה בטעינת אנשי קשר");
-        return;
-      }
-      setContacts(dataJson.contacts ?? []);
-      setContactsMessage(dataJson.message ?? null);
-    } catch (err) {
-      setContactsMessage(err instanceof Error ? err.message : "שגיאה בטעינת אנשי קשר");
-    } finally {
-      setLoadingContacts(false);
+      return Boolean(data.session);
+    } catch {
+      setSignedIn(false);
+      setContactsMessage("שגיאה בבדיקת התחברות");
+      return false;
     }
   }, [getSupabase]);
 
   useEffect(() => {
-    void loadContacts();
-  }, [loadContacts]);
+    void checkSession();
+  }, [checkSession]);
 
-  const suggestions = useMemo(() => {
-    const q = normalize(search);
-    const scored = contacts
-      .map((c) => ({
-        contact: c,
-        score: Math.max(rankMatch(guest.name, c.name), q ? rankMatch(q, c.name) : 0),
-      }))
-      .sort((a, b) => b.score - a.score || a.contact.name.localeCompare(b.contact.name, "he"));
+  // חיפוש דינמי בשרת (searchContacts) — debounce כדי לא להציף את Google
+  useEffect(() => {
+    let cancelled = false;
+    const term = search.trim();
 
-    if (!q || q === normalize(guest.name)) {
-      const matched = scored.filter((x) => x.score >= 25).slice(0, 30);
-      if (matched.length > 0) return matched.map((x) => x.contact);
-      return contacts.slice(0, 40);
+    if (!signedIn) return;
+    if (term.length < 1) {
+      setContacts([]);
+      setContactsMessage("הקלידו שם לחיפוש באנשי הקשר");
+      setLoadingContacts(false);
+      return;
     }
 
-    return scored
-      .filter((x) => normalize(x.contact.name).includes(q) || x.score >= 25)
-      .slice(0, 40)
-      .map((x) => x.contact);
-  }, [contacts, guest.name, search]);
+    setLoadingContacts(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/tasks/contacts?q=${encodeURIComponent(term)}`);
+        const dataJson = (await res.json()) as {
+          contacts?: GoogleContactSummary[];
+          message?: string | null;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          setContacts([]);
+          setContactsMessage(dataJson.error ?? "שגיאה בחיפוש אנשי קשר");
+          return;
+        }
+        setContacts(dataJson.contacts ?? []);
+        setContactsMessage(dataJson.message ?? null);
+      } catch (err) {
+        if (!cancelled) {
+          setContactsMessage(err instanceof Error ? err.message : "שגיאה בחיפוש אנשי קשר");
+        }
+      } finally {
+        if (!cancelled) setLoadingContacts(false);
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [search, signedIn]);
+
+  const suggestions = contacts;
 
   async function signInGoogle() {
     try {
@@ -265,7 +259,43 @@ export function GuestContactLinker({
               ) : (
                 <button
                   type="button"
-                  onClick={() => void loadContacts()}
+                  onClick={() => {
+                    // מפעיל מחדש את ה-effect ע"י אותו ערך + tick
+                    setSearch((prev) => prev.trim());
+                    setContactsMessage(null);
+                    setLoadingContacts(true);
+                    void (async () => {
+                      const term = search.trim();
+                      if (!term) {
+                        setLoadingContacts(false);
+                        setContactsMessage("הקלידו שם לחיפוש באנשי הקשר");
+                        return;
+                      }
+                      try {
+                        const res = await fetch(
+                          `/api/tasks/contacts?q=${encodeURIComponent(term)}`,
+                        );
+                        const dataJson = (await res.json()) as {
+                          contacts?: GoogleContactSummary[];
+                          message?: string | null;
+                          error?: string;
+                        };
+                        if (!res.ok) {
+                          setContacts([]);
+                          setContactsMessage(dataJson.error ?? "שגיאה בחיפוש");
+                          return;
+                        }
+                        setContacts(dataJson.contacts ?? []);
+                        setContactsMessage(dataJson.message ?? null);
+                      } catch (err) {
+                        setContactsMessage(
+                          err instanceof Error ? err.message : "שגיאה בחיפוש",
+                        );
+                      } finally {
+                        setLoadingContacts(false);
+                      }
+                    })();
+                  }}
                   className="text-xs font-semibold text-violet-700"
                 >
                   רענון
@@ -282,13 +312,13 @@ export function GuestContactLinker({
             />
 
             {loadingContacts && (
-              <p className="mt-2 text-center text-xs text-slate-400">טוען אנשי קשר...</p>
+              <p className="mt-2 text-center text-xs text-slate-400">מחפש באנשי קשר...</p>
             )}
             {contactsMessage && !loadingContacts && (
               <p className="mt-2 text-xs text-amber-800">{contactsMessage}</p>
             )}
 
-            {!loadingContacts && signedIn && suggestions.length === 0 && (
+            {!loadingContacts && signedIn && suggestions.length === 0 && search.trim() && !contactsMessage && (
               <p className="mt-2 text-center text-xs text-slate-400">לא נמצאו תוצאות</p>
             )}
 

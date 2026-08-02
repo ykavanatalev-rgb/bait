@@ -382,7 +382,7 @@ export function GuestListPage() {
           <h1 className="text-3xl font-bold">רשימת מוזמנים</h1>
           <p className="mt-1 text-white/85">לחצי על 📇 טלפון ליד כל שם כדי לקשר מספר</p>
           <p className="mt-2 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold">
-            גרסה contacts-v3
+            גרסה contacts-v4
           </p>
         </div>
       </header>

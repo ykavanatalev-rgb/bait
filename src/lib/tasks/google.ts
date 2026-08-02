@@ -55,6 +55,98 @@ export interface GoogleContact {
   phone?: string;
 }
 
+type PeoplePerson = {
+  resourceName?: string;
+  names?: { displayName?: string }[];
+  emailAddresses?: { value?: string }[];
+  phoneNumbers?: { value?: string }[];
+};
+
+function mapPerson(person: PeoplePerson): GoogleContact | null {
+  const name =
+    person.names?.[0]?.displayName?.trim() ||
+    person.emailAddresses?.[0]?.value?.trim() ||
+    "";
+  if (!name || !person.resourceName) return null;
+  const phone = person.phoneNumbers?.find((p) => p.value?.trim())?.value?.trim();
+  return {
+    resourceName: person.resourceName,
+    name,
+    email: person.emailAddresses?.[0]?.value,
+    phone,
+  };
+}
+
+/**
+ * חיפוש דינמי באנשי קשר (מתאים לאלפי אנשי קשר).
+ * משתמש ב-people.searchContacts + otherContacts.search במקום
+ * connections.list עם pageSize מוגבל.
+ */
+export async function searchGoogleContacts(
+  accessToken: string,
+  query: string,
+): Promise<GoogleContact[]> {
+  const q = query.trim();
+  if (q.length < 1) return [];
+
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
+  // Google דורש warmup של אינדקס החיפוש לפני searchContacts
+  await fetch(
+    `${PEOPLE_API_BASE}/people/me/connections?personFields=names&pageSize=1`,
+    { headers },
+  ).catch(() => {
+    /* warmup best-effort */
+  });
+
+  const params = new URLSearchParams({
+    query: q,
+    readMask: "names,phoneNumbers,emailAddresses",
+    pageSize: "30",
+  });
+
+  const [contactsRes, otherRes] = await Promise.all([
+    fetch(`${PEOPLE_API_BASE}/people:searchContacts?${params}`, { headers }),
+    fetch(`${PEOPLE_API_BASE}/otherContacts:search?${params}`, { headers }),
+  ]);
+
+  const contacts: GoogleContact[] = [];
+  const seen = new Set<string>();
+
+  function pushPerson(person: PeoplePerson | undefined) {
+    if (!person) return;
+    const mapped = mapPerson(person);
+    if (!mapped || seen.has(mapped.resourceName)) return;
+    seen.add(mapped.resourceName);
+    contacts.push(mapped);
+  }
+
+  if (contactsRes.ok) {
+    const data = (await contactsRes.json()) as {
+      results?: Array<{ person?: PeoplePerson }>;
+    };
+    for (const row of data.results ?? []) pushPerson(row.person);
+  } else {
+    const errBody = (await contactsRes.json().catch(() => ({}))) as {
+      error?: { message?: string };
+    };
+    throw new Error(
+      errBody.error?.message ??
+        `חיפוש אנשי קשר נכשל (${contactsRes.status})`,
+    );
+  }
+
+  if (otherRes.ok) {
+    const data = (await otherRes.json()) as {
+      results?: Array<{ person?: PeoplePerson }>;
+    };
+    for (const row of data.results ?? []) pushPerson(row.person);
+  }
+
+  return contacts;
+}
+
+/** @deprecated עדיף searchGoogleContacts — מוגבל ל-300 אנשי קשר */
 export async function fetchGoogleContacts(accessToken: string): Promise<GoogleContact[]> {
   const headers = { Authorization: `Bearer ${accessToken}` };
 
@@ -72,41 +164,21 @@ export async function fetchGoogleContacts(accessToken: string): Promise<GoogleCo
 
   if (connectionsRes.ok) {
     const data = (await connectionsRes.json()) as {
-      connections?: Array<{
-        resourceName: string;
-        names?: { displayName?: string }[];
-        emailAddresses?: { value?: string }[];
-        phoneNumbers?: { value?: string }[];
-      }>;
+      connections?: PeoplePerson[];
     };
     for (const person of data.connections ?? []) {
-      const name = person.names?.[0]?.displayName;
-      if (!name) continue;
-      contacts.push({
-        resourceName: person.resourceName,
-        name,
-        email: person.emailAddresses?.[0]?.value,
-        phone: person.phoneNumbers?.[0]?.value,
-      });
+      const mapped = mapPerson(person);
+      if (mapped) contacts.push(mapped);
     }
   }
 
   if (otherRes.ok) {
     const data = (await otherRes.json()) as {
-      otherContacts?: Array<{
-        resourceName: string;
-        names?: { displayName?: string }[];
-        emailAddresses?: { value?: string }[];
-      }>;
+      otherContacts?: PeoplePerson[];
     };
     for (const person of data.otherContacts ?? []) {
-      const name = person.names?.[0]?.displayName ?? person.emailAddresses?.[0]?.value;
-      if (!name) continue;
-      contacts.push({
-        resourceName: person.resourceName,
-        name,
-        email: person.emailAddresses?.[0]?.value,
-      });
+      const mapped = mapPerson(person);
+      if (mapped) contacts.push(mapped);
     }
   }
 
