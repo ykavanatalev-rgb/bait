@@ -5,7 +5,7 @@ import { exportGuestsToCsv, openGuestsWhatsAppReport } from "@/lib/guests/export
 import { isContactPickerSupported } from "@/lib/guests/contacts";
 import { BackToHomeButton } from "@/components/checklist/BackToHomeButton";
 import { ContactSyncPrompt, ContactSyncWizard } from "@/components/guests/ContactSync";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type GuestWithCategory = Guest & { categoryName: string };
 
@@ -24,6 +24,7 @@ export function GuestListPage() {
   const [showSyncPrompt, setShowSyncPrompt] = useState(false);
   const [syncActive, setSyncActive] = useState(false);
   const [pickerSupported, setPickerSupported] = useState(false);
+  const autoSyncStarted = useRef(false);
 
   const totalGuests = useMemo(
     () => categories.reduce((sum, c) => sum + c.guests.length, 0),
@@ -81,12 +82,15 @@ export function GuestListPage() {
   useEffect(() => {
     if (loading || error || syncActive) return;
     if (guestsMissingPhone.length === 0) return;
+    if (autoSyncStarted.current) return;
     try {
       if (sessionStorage.getItem(PROMPT_DISMISS_KEY) === "1") return;
     } catch {
       /* ignore */
     }
-    setShowSyncPrompt(true);
+    autoSyncStarted.current = true;
+    // בכניסה לעמוד — פותחים מיד את מסך הסינכרון
+    setSyncActive(true);
   }, [loading, error, syncActive, guestsMissingPhone.length]);
 
   function dismissSyncPrompt() {
@@ -98,7 +102,21 @@ export function GuestListPage() {
     }
   }
 
+  function closeContactSync() {
+    setSyncActive(false);
+    try {
+      sessionStorage.setItem(PROMPT_DISMISS_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  }
+
   function startContactSync() {
+    try {
+      sessionStorage.removeItem(PROMPT_DISMISS_KEY);
+    } catch {
+      /* ignore */
+    }
     setShowSyncPrompt(false);
     setSyncActive(true);
   }
@@ -569,7 +587,7 @@ export function GuestListPage() {
         <ContactSyncWizard
           guests={allGuests}
           onSave={saveGuestContact}
-          onClose={() => setSyncActive(false)}
+          onClose={closeContactSync}
         />
       )}
     </div>

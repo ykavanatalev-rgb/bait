@@ -30,7 +30,7 @@ export function ContactSyncPrompt({
   if (!open || missingCount === 0) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-4 sm:items-center">
+    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 p-4 sm:items-center">
       <div
         role="dialog"
         aria-labelledby="contacts-sync-title"
@@ -141,7 +141,7 @@ export function ContactSyncWizard({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 p-4 sm:items-center">
+    <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/55 p-4 sm:items-center">
       <div
         role="dialog"
         aria-labelledby="contacts-wizard-title"
@@ -188,9 +188,10 @@ export function ContactSyncWizard({
                 {busy ? "שומר..." : "פתח אנשי קשר"}
               </button>
             ) : (
-              <p className="mt-3 text-xs text-amber-800">
-                בחירת אנשי קשר מהמכשיר לא זמינה כאן — הזינו טלפון ידנית למטה.
-              </p>
+              <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-100">
+                <p className="font-semibold">אייפון / דפדפן זה לא מאפשרים לפתוח את אנשי הקשר מהאתר.</p>
+                <p className="mt-1">הזיני את מספר הטלפון ידנית למטה (או פתחי ב-Chrome באנדרואיד לסינכרון אוטומטי).</p>
+              </div>
             )}
 
             <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
