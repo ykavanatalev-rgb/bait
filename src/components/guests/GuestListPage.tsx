@@ -1034,7 +1034,7 @@ function GuestRow({
           <button
             type="button"
             onClick={onLinkContact}
-            className="min-w-0 flex-1 text-right"
+            className="min-w-0 flex-1 rounded-lg px-1 py-1 text-right hover:bg-violet-100/80 active:bg-violet-100"
           >
             <span className="block text-sm font-semibold text-slate-800">{guest.name}</span>
             {guest.phone ? (
@@ -1046,16 +1046,23 @@ function GuestRow({
               </span>
             ) : (
               <span className="mt-0.5 block text-xs font-semibold text-amber-600">
-                לחצי כאן ← חיפוש באנשי קשר
+                אין טלפון — לחצי לקישור
               </span>
             )}
+          </button>
+          <button
+            type="button"
+            onClick={onLinkContact}
+            className="shrink-0 rounded-xl bg-violet-600 px-3 py-2 text-xs font-bold text-white shadow-sm active:bg-violet-700"
+          >
+            📇 טלפון
           </button>
           <select
             value={guest.category_id}
             onChange={(e) => onMoveCategory(guest.id, guest.category_id, e.target.value)}
             disabled={busy}
             title="העבר לקטגוריה"
-            className="max-w-[8rem] truncate rounded-lg border border-violet-200 bg-white px-1.5 py-1 text-xs text-violet-800 outline-none sm:max-w-[10rem]"
+            className="max-w-[7rem] truncate rounded-lg border border-violet-200 bg-white px-1.5 py-1 text-xs text-violet-800 outline-none sm:max-w-[10rem]"
           >
             {categories.map((cat) => (
               <option key={cat.id} value={cat.id}>

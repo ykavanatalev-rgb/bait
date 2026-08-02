@@ -28,7 +28,9 @@ function rankMatch(guestName: string, contactName: string): number {
   if (c.includes(g) || g.includes(c)) return 80;
   const gParts = g.split(" ");
   const cParts = c.split(" ");
-  const overlap = gParts.filter((p) => p.length > 1 && cParts.some((cp) => cp.includes(p) || p.includes(cp)));
+  const overlap = gParts.filter(
+    (p) => p.length > 1 && cParts.some((cp) => cp.includes(p) || p.includes(cp)),
+  );
   return overlap.length * 25;
 }
 
@@ -49,7 +51,6 @@ export function GuestContactLinker({
   onSkip?: () => void;
   onClose: () => void;
 }) {
-  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const pickerSupported = isContactPickerSupported();
 
   const [search, setSearch] = useState(guest.name);
@@ -69,15 +70,26 @@ export function GuestContactLinker({
     setError(null);
   }, [guest.id, guest.name, guest.phone, guest.contact_name]);
 
+  const getSupabase = useCallback(() => {
+    try {
+      return createBrowserSupabaseClient();
+    } catch (err) {
+      throw new Error(
+        err instanceof Error ? err.message : "שגיאה בחיבור ל-Supabase בדפדפן",
+      );
+    }
+  }, []);
+
   const loadContacts = useCallback(async () => {
     setLoadingContacts(true);
     setContactsMessage(null);
     try {
+      const supabase = getSupabase();
       const { data } = await supabase.auth.getSession();
       setSignedIn(Boolean(data.session));
       if (!data.session) {
         setContacts([]);
-        setContactsMessage("התחברו עם Google כדי לחפש באנשי הקשר (עובד גם באייפון)");
+        setContactsMessage("התחברי עם Google כדי לחפש באנשי הקשר (עובד גם באייפון)");
         return;
       }
 
@@ -94,12 +106,12 @@ export function GuestContactLinker({
       }
       setContacts(dataJson.contacts ?? []);
       setContactsMessage(dataJson.message ?? null);
-    } catch {
-      setContactsMessage("שגיאה בטעינת אנשי קשר");
+    } catch (err) {
+      setContactsMessage(err instanceof Error ? err.message : "שגיאה בטעינת אנשי קשר");
     } finally {
       setLoadingContacts(false);
     }
-  }, [supabase]);
+  }, [getSupabase]);
 
   useEffect(() => {
     void loadContacts();
@@ -127,20 +139,25 @@ export function GuestContactLinker({
   }, [contacts, guest.name, search]);
 
   async function signInGoogle() {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        scopes: GOOGLE_OAUTH_SCOPES,
-        queryParams: { access_type: "offline", prompt: "consent" },
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/guests")}`,
-      },
-    });
+    try {
+      const supabase = getSupabase();
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          scopes: GOOGLE_OAUTH_SCOPES,
+          queryParams: { access_type: "offline", prompt: "consent" },
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/guests")}`,
+        },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה בהתחברות Google");
+    }
   }
 
   async function applyContact(phone: string, contactName: string) {
     const cleanPhone = phone.trim();
     if (!cleanPhone) {
-      setError("לא נמצא מספר טלפון באיש הקשר — הזינו ידנית");
+      setError("לא נמצא מספר טלפון — הזיני ידנית למטה");
       return;
     }
     setBusy(true);
@@ -178,17 +195,22 @@ export function GuestContactLinker({
       : null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/55 p-3 sm:items-center">
+    <div
+      className="fixed inset-0 z-[200] flex items-end justify-center bg-black/60 p-3 sm:items-center"
+      onClick={onClose}
+    >
       <div
         role="dialog"
+        aria-modal="true"
         aria-labelledby="guest-contact-title"
-        className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-violet-100"
+        className="flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-violet-100"
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-violet-100 px-4 py-3">
           <div className="flex items-start justify-between gap-2">
             <div>
               <h2 id="guest-contact-title" className="text-lg font-bold text-slate-900">
-                בחרי איש קשר
+                קישור טלפון למוזמן
               </h2>
               {progressLabel && (
                 <p className="text-xs font-semibold text-violet-600">{progressLabel}</p>
@@ -224,8 +246,8 @@ export function GuestContactLinker({
 
           {!pickerSupported && (
             <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-100">
-              באייפון אי אפשר לפתוח את פנקס הכתובות של המכשיר מהאתר. חפשי באנשי הקשר של
-              Google למטה (או הזיני טלפון ידנית).
+              באייפון אי אפשר לפתוח את פנקס הכתובות של המכשיר מהאתר. התחברי עם Google
+              וחפשי למטה, או הזיני טלפון ידנית.
             </p>
           )}
 
@@ -257,7 +279,6 @@ export function GuestContactLinker({
               onChange={(e) => setSearch(e.target.value)}
               placeholder="חפשי שם..."
               className="w-full rounded-xl border border-violet-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-300"
-              autoFocus
             />
 
             {loadingContacts && (
