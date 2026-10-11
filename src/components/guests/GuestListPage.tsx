@@ -1,9 +1,11 @@
 "use client";
 
 import type { Guest, GuestCategoryWithGuests } from "@/lib/guests/types";
-import { exportGuestsToCsv, openGuestsWhatsAppReport } from "@/lib/guests/export";
+import { openGuestsWhatsAppReport } from "@/lib/guests/export";
 import { BackToHomeButton } from "@/components/checklist/BackToHomeButton";
 import { GuestContactLinker } from "@/components/guests/ContactSync";
+import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { GOOGLE_OAUTH_SCOPES } from "@/lib/tasks/scopes";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type GuestWithCategory = Guest & { categoryName: string };
@@ -26,6 +28,9 @@ export function GuestListPage() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [linking, setLinking] = useState<LinkingState | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<string | null>(null);
+  const [googleConnected, setGoogleConnected] = useState(false);
 
   const totalGuests = useMemo(
     () => categories.reduce((sum, c) => sum + c.guests.length, 0),
@@ -92,14 +97,121 @@ export function GuestListPage() {
     });
   }
 
-  function startContactSync() {
-    const missing = guestsMissingPhone;
-    if (missing.length === 0) {
-      alert("לכל המוזמנים כבר יש מספר טלפון");
-      return;
+  const connectGoogle = useCallback(async () => {
+    const supabase = createBrowserSupabaseClient();
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        scopes: GOOGLE_OAUTH_SCOPES,
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+          include_granted_scopes: "true",
+        },
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/guests?sync=1")}`,
+      },
+    });
+  }, []);
+
+  const runGoogleSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncSummary(null);
+    setError(null);
+    try {
+      const res = await fetch("/api/guests/sync-phones", { method: "POST" });
+      const data = (await res.json()) as {
+        error?: string;
+        detail?: string;
+        reconnect?: boolean;
+        matched?: number;
+        unmatched?: number;
+        message?: string | null;
+        ambiguous?: { guestId: string }[];
+      };
+
+      if (data.reconnect || res.status === 401) {
+        setGoogleConnected(false);
+        await connectGoogle();
+        return;
+      }
+      if (!res.ok) throw new Error(data.error ?? data.detail ?? "שגיאה בסנכרון");
+
+      setGoogleConnected(true);
+      const listRes = await fetch("/api/guests");
+      const listData = (await listRes.json()) as { categories?: GuestCategoryWithGuests[] };
+      const nextCategories = listData.categories ?? [];
+      if (listRes.ok) setCategories(nextCategories);
+
+      const ambiguousIds = new Set((data.ambiguous ?? []).map((row) => row.guestId));
+      const queue = nextCategories.flatMap((category) =>
+        category.guests.filter((guest) => ambiguousIds.has(guest.id)),
+      );
+
+      const parts = [`נשמרו ${data.matched ?? 0} טלפונים`];
+      if (data.unmatched) parts.push(`${data.unmatched} בלי התאמה`);
+      if (queue.length) parts.push(`${queue.length} לבחירה ידנית`);
+      setSyncSummary(data.message ? `${parts.join(" · ")}. ${data.message}` : parts.join(" · "));
+
+      const first = queue[0];
+      if (first) {
+        setLinking({
+          guest: first,
+          categoryName: nextCategories.find((category) => category.id === first.category_id)?.name ?? "",
+          queue,
+          index: 0,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "שגיאה בסנכרון אנשי קשר");
+    } finally {
+      setSyncing(false);
     }
-    openGuestContact(missing[0], missing);
-  }
+  }, [connectGoogle]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/guests/sync-phones")
+      .then((res) => res.json())
+      .then((data: { connected?: boolean }) => {
+        if (active) setGoogleConnected(Boolean(data.connected));
+      })
+      .catch(() => {
+        if (active) setGoogleConnected(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const googleError = params.get("google_error");
+    const noRefresh = params.get("google") === "no_refresh";
+    const shouldSync = params.get("sync") === "1" && !noRefresh && !googleError;
+    if (!googleError && !noRefresh && !shouldSync) return;
+
+    const timer = window.setTimeout(() => {
+      if (googleError) setError(`התחברות Google הצליחה חלקית: ${googleError}`);
+      else if (noRefresh) {
+        setError("Google לא נתן הרשאה קבועה לאנשי קשר. לחצי שוב על הסנכרון ואשרי את כל ההרשאות.");
+      }
+      if (!shouldSync) return;
+
+      const lock = Number(sessionStorage.getItem("bait-sync-lock") ?? "0");
+      if (Date.now() - lock < 8000) return;
+      sessionStorage.setItem("bait-sync-lock", String(Date.now()));
+      params.delete("sync");
+      const qs = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
+      );
+      void runGoogleSync();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [runGoogleSync]);
 
   function advanceOrCloseLinking() {
     setLinking((prev) => {
@@ -380,9 +492,9 @@ export function GuestListPage() {
       <header className="bg-gradient-to-l from-violet-500 to-purple-600 px-4 py-8 text-white shadow-lg">
         <div className="mx-auto max-w-3xl">
           <h1 className="text-3xl font-bold">רשימת מוזמנים</h1>
-          <p className="mt-1 text-white/85">לחצי על 📇 טלפון ליד כל שם כדי לקשר מספר</p>
+          <p className="mt-1 text-white/85">סנכרון טלפונים מ-Google, ואז ייצוא לקובץ של החברה</p>
           <p className="mt-2 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold">
-            גרסה contacts-v4
+            גרסה contacts-v5
           </p>
         </div>
       </header>
@@ -399,34 +511,45 @@ export function GuestListPage() {
           </button>
           <button
             type="button"
-            onClick={() => exportGuestsToCsv(categories)}
+            onClick={() => {
+              window.location.href = "/api/guests/export-invitations";
+            }}
             disabled={totalGuests === 0}
             className="rounded-xl px-4 py-2 text-sm font-semibold text-violet-700 ring-1 ring-violet-200 hover:bg-violet-50 disabled:opacity-40"
           >
-            ↓ ייצוא Excel
+            ↓ ייצוא לחברה
           </button>
           <button
             type="button"
-            onClick={startContactSync}
-            disabled={totalGuests === 0}
-            className="rounded-xl px-4 py-2 text-sm font-semibold text-violet-700 ring-1 ring-violet-200 hover:bg-violet-50 disabled:opacity-40"
+            onClick={() => void (googleConnected ? runGoogleSync() : connectGoogle())}
+            disabled={totalGuests === 0 || syncing}
+            className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
           >
-            📇 סנכרן אנשי קשר
-            {guestsMissingPhone.length > 0 ? ` (${guestsMissingPhone.length})` : ""}
+            {syncing
+              ? "מסנכרן טלפונים..."
+              : googleConnected
+                ? `סנכרן טלפונים מ-Google${guestsMissingPhone.length > 0 ? ` (${guestsMissingPhone.length})` : ""}`
+                : "חבר Google וסנכרן טלפונים"}
           </button>
         </div>
+
+        {syncSummary && (
+          <p className="mb-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 ring-1 ring-emerald-200">
+            {syncSummary}
+          </p>
+        )}
 
         {!loading && !error && guestsMissingPhone.length > 0 && (
           <button
             type="button"
-            onClick={startContactSync}
+            onClick={() => void (googleConnected ? runGoogleSync() : connectGoogle())}
             className="mb-4 w-full rounded-2xl bg-violet-50 px-4 py-3 text-right ring-1 ring-violet-200 hover:bg-violet-100/70"
           >
             <span className="block text-sm font-bold text-violet-800">
               {guestsMissingPhone.length} מוזמנים בלי טלפון — התחילי כאן
             </span>
             <span className="mt-0.5 block text-xs text-violet-600">
-              או לחצי על כל שם ברשימה כדי לחפש באנשי קשר ולשמור מספר
+              הסנכרון שומר טלפון כשיש התאמה אחת ב-Google. בלי התאמה — לחצי על השם.
             </span>
           </button>
         )}

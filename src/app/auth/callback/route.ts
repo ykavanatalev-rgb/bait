@@ -20,6 +20,8 @@ export async function GET(request: NextRequest) {
   const { session, user } = data;
   const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
 
+  const destination = new URL(next, request.url);
+
   try {
     await upsertTaskProfile({
       id: user.id,
@@ -27,12 +29,18 @@ export async function GET(request: NextRequest) {
       fullName: (metadata.full_name as string) ?? (metadata.name as string) ?? null,
       avatarUrl: (metadata.avatar_url as string) ?? (metadata.picture as string) ?? null,
       refreshToken: session.provider_refresh_token ?? null,
-      scopes: session.provider_token ? "granted" : null,
+      scopes: session.provider_refresh_token ? "contacts calendar" : null,
     });
-  } catch {
-    // אל תפילו את ההתחברות בגלל כשל בשמירת הפרופיל — המשתמש כבר מחובר,
-    // ננסה לשמור שוב בפעם הבאה שהוא מתחבר.
+  } catch (error) {
+    destination.searchParams.set(
+      "google_error",
+      error instanceof Error ? error.message : "profile_save_failed",
+    );
   }
 
-  return NextResponse.redirect(new URL(next, request.url));
+  if (!session.provider_refresh_token) {
+    destination.searchParams.set("google", "no_refresh");
+  }
+
+  return NextResponse.redirect(destination);
 }

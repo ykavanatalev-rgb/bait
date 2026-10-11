@@ -290,6 +290,30 @@ export async function updateGuestName(guestId: string, name: string): Promise<Gu
   return mapGuest(data);
 }
 
+export async function updateGuestContactsBulk(
+  updates: { id: string; phone: string; contact_name: string | null }[],
+): Promise<number> {
+  if (updates.length === 0) return 0;
+  const supabase = createAdminClient();
+  const chunkSize = 20;
+
+  for (let index = 0; index < updates.length; index += chunkSize) {
+    const chunk = updates.slice(index, index + chunkSize);
+    const results = await Promise.all(
+      chunk.map((row) =>
+        supabase
+          .from("guests")
+          .update({ phone: row.phone, contact_name: row.contact_name })
+          .eq("id", row.id),
+      ),
+    );
+    const failed = results.find((result) => result.error);
+    if (failed?.error) throw failed.error;
+  }
+
+  return updates.length;
+}
+
 export async function updateGuestContact(
   guestId: string,
   fields: { phone?: string | null; contact_name?: string | null },

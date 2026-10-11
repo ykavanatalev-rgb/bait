@@ -62,19 +62,122 @@ type PeoplePerson = {
   phoneNumbers?: { value?: string }[];
 };
 
+function compactPhone(raw: string): string {
+  return raw.replace(/[\s\-().]/g, "");
+}
+
+function isMobileNumber(raw: string): boolean {
+  const compact = compactPhone(raw);
+  const local = compact.replace(/^(?:\+|00)?972/, "0");
+  return /^0?5\d/.test(local) || /^0?7\d/.test(local);
+}
+
+function pickPhone(numbers?: { value?: string }[]): string | undefined {
+  const values = (numbers ?? [])
+    .map((n) => n.value?.trim())
+    .filter((value): value is string => Boolean(value));
+  return values.find((value) => isMobileNumber(value)) ?? values[0];
+}
+
+export class GooglePeopleError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 function mapPerson(person: PeoplePerson): GoogleContact | null {
   const name =
     person.names?.[0]?.displayName?.trim() ||
     person.emailAddresses?.[0]?.value?.trim() ||
     "";
   if (!name || !person.resourceName) return null;
-  const phone = person.phoneNumbers?.find((p) => p.value?.trim())?.value?.trim();
   return {
     resourceName: person.resourceName,
     name,
     email: person.emailAddresses?.[0]?.value,
-    phone,
+    phone: pickPhone(person.phoneNumbers),
   };
+}
+
+type PeopleListResponse = {
+  connections?: PeoplePerson[];
+  otherContacts?: PeoplePerson[];
+  nextPageToken?: string;
+  error?: { message?: string; status?: string };
+};
+
+const contactListCache = new Map<string, { expires: number; contacts: GoogleContact[] }>();
+
+async function readPeopleError(response: Response): Promise<GooglePeopleError> {
+  const body = (await response.json().catch(() => ({}))) as PeopleListResponse;
+  return new GooglePeopleError(
+    body.error?.message ?? `People API ${response.status}`,
+    response.status,
+  );
+}
+
+async function listPeoplePages(
+  accessToken: string,
+  firstUrl: string,
+  listKey: "connections" | "otherContacts",
+): Promise<PeoplePerson[]> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const people: PeoplePerson[] = [];
+  let url: string | null = firstUrl;
+
+  for (let page = 0; url && page < 30; page += 1) {
+    const response = await fetch(url, { headers, cache: "no-store" });
+    if (!response.ok) throw await readPeopleError(response);
+    const data = (await response.json()) as PeopleListResponse;
+    people.push(...(data[listKey] ?? []));
+    url = data.nextPageToken
+      ? `${firstUrl}&pageToken=${encodeURIComponent(data.nextPageToken)}`
+      : null;
+  }
+
+  return people;
+}
+
+/**
+ * כל אנשי הקשר של החשבון, כולל טלפון.
+ * searchContacts של Google מחזיר ריק לעיתים קרובות בעברית — הרשימה המלאה אמינה יותר.
+ */
+export async function listAllGoogleContacts(accessToken: string): Promise<GoogleContact[]> {
+  const cacheKey = accessToken.slice(-24);
+  const cached = contactListCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.contacts;
+
+  const connections = await listPeoplePages(
+    accessToken,
+    `${PEOPLE_API_BASE}/people/me/connections?personFields=names,emailAddresses,phoneNumbers&pageSize=1000`,
+    "connections",
+  );
+
+  let others: PeoplePerson[] = [];
+  try {
+    others = await listPeoplePages(
+      accessToken,
+      `${PEOPLE_API_BASE}/otherContacts?readMask=names,emailAddresses,phoneNumbers&pageSize=1000`,
+      "otherContacts",
+    );
+  } catch {
+    // other contacts are optional — the main address book is enough
+  }
+
+  const contacts: GoogleContact[] = [];
+  const seen = new Set<string>();
+  for (const person of [...connections, ...others]) {
+    const mapped = mapPerson(person);
+    if (!mapped || seen.has(mapped.resourceName)) continue;
+    seen.add(mapped.resourceName);
+    contacts.push(mapped);
+  }
+
+  contactListCache.set(cacheKey, { expires: Date.now() + 3 * 60 * 1000, contacts });
+  return contacts;
 }
 
 /**
@@ -130,9 +233,9 @@ export async function searchGoogleContacts(
     const errBody = (await contactsRes.json().catch(() => ({}))) as {
       error?: { message?: string };
     };
-    throw new Error(
-      errBody.error?.message ??
-        `חיפוש אנשי קשר נכשל (${contactsRes.status})`,
+    throw new GooglePeopleError(
+      errBody.error?.message ?? `חיפוש אנשי קשר נכשל (${contactsRes.status})`,
+      contactsRes.status,
     );
   }
 

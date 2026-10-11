@@ -139,8 +139,12 @@ export function GuestContactLinker({
         provider: "google",
         options: {
           scopes: GOOGLE_OAUTH_SCOPES,
-          queryParams: { access_type: "offline", prompt: "consent" },
-          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/guests")}`,
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+            include_granted_scopes: "true",
+          },
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent("/guests?sync=1")}`,
         },
       });
     } catch (err) {

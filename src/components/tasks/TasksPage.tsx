@@ -137,7 +137,11 @@ export function TasksPage() {
       provider: "google",
       options: {
         scopes: GOOGLE_OAUTH_SCOPES,
-        queryParams: { access_type: "offline", prompt: "consent" },
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+          include_granted_scopes: "true",
+        },
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
